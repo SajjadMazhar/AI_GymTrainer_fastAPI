@@ -11,6 +11,10 @@
 
   <section id="setup-screen" class="screen">
     <h1>AI Gym Trainer</h1>
+
+    <label for="user-id-input">User ID (optional - for personalized thresholds)</label>
+    <input id="user-id-input" type="text" placeholder="Leave blank to use defaults" />
+
     <label for="exercise-select">Exercise</label>
     <select id="exercise-select">
       <option value="squat">Squat</option>
@@ -23,6 +27,8 @@
     <input id="bodyweight-input" type="number" min="20" max="300" step="0.5" value="70" />
 
     <button id="start-btn" class="primary-btn">Start Workout</button>
+    <button id="auto-detect-btn" class="primary-btn">Auto-Detect Exercise</button>
+    <a href="/static/calibrate.html" class="secondary-btn">Personalize Thresholds</a>
     <p class="hint">
       Prop your phone up so your whole body is visible, then tap Start and
       grant camera access.
@@ -56,6 +62,10 @@
       <div class="stat">
         <span class="stat-value" id="timer">00:00</span>
         <span class="stat-label">Time</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="risk-score">0</span>
+        <span class="stat-label">Risk</span>
       </div>
     </div>
 

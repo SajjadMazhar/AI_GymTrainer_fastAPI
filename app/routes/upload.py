@@ -60,4 +60,5 @@ async def analyze_video(
         "calories_estimate": result.calories_estimate,
         "feedback_summary": result.feedback_summary,
         "truncated": result.truncated,
+        "average_risk_score": result.average_risk_score,
     }

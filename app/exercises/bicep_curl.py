@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from app.exercises.angles import calculate_angle, horizontal_distance, midpoint
+from app.exercises.angles import (
+    calculate_angle,
+    horizontal_distance,
+    midpoint,
+    point_velocity,
+    velocity_magnitude,
+)
 from app.exercises.base import (
     VISIBILITY_THRESHOLD,
     AnalysisResult,
@@ -19,6 +25,10 @@ FULL_EXTENSION_CUTOFF = 155.0  # must reach at or above this angle to count as f
 TORSO_SWING_LIMIT = 0.05  # normalized-unit drift of shoulder mid from its resting offset to hip mid
 ELBOW_DRIFT_LIMIT = 0.08  # normalized-unit growth in elbow-to-shoulder horizontal distance during a rep
 
+# Velocity-based risk thresholds
+WRIST_VELOCITY_WARN = 0.20  # sudden wrist acceleration (jerking the weight)
+WRIST_VELOCITY_DANGER = 0.35
+
 _LEFT_ARM = (LM.LEFT_SHOULDER, LM.LEFT_ELBOW, LM.LEFT_WRIST)
 _RIGHT_ARM = (LM.RIGHT_SHOULDER, LM.RIGHT_ELBOW, LM.RIGHT_WRIST)
 
@@ -26,8 +36,8 @@ _RIGHT_ARM = (LM.RIGHT_SHOULDER, LM.RIGHT_ELBOW, LM.RIGHT_WRIST)
 class BicepCurlAnalyzer(ExerciseAnalyzer):
     name = "bicep_curl"
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, calibration: dict[str, float] | None = None) -> None:
+        super().__init__(calibration)
         self._torso_baseline: tuple[float, float] | None = None
         self._elbow_shoulder_dist_at_rep_start: float | None = None
 
@@ -41,14 +51,20 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
         elbow_angle = calculate_angle(shoulder, elbow, wrist)
         smoothed = self._smooth(elbow_angle)
 
+        # Use personalized thresholds if available
+        down_thresh = self._calibration.get("down_threshold", DOWN_THRESH)
+        up_thresh = self._calibration.get("up_threshold", UP_THRESH)
+        extension_cutoff = self._calibration.get("depth_cutoff", FULL_EXTENSION_CUTOFF)
+
         was_up = self.phase == RepPhase.UP
-        rep_completed = self._update_phase(smoothed, DOWN_THRESH, UP_THRESH)
+        rep_completed = self._update_phase(smoothed, down_thresh, up_thresh)
         if was_up and self.phase == RepPhase.DOWN:
             self._elbow_shoulder_dist_at_rep_start = horizontal_distance(elbow, shoulder)
 
         errors: list[str] = []
+        frame_risk = 0
         if self.phase == RepPhase.UP and self._max_angle_this_phase is not None:
-            if self._max_angle_this_phase < FULL_EXTENSION_CUTOFF:
+            if self._max_angle_this_phase < extension_cutoff:
                 errors.append("INCOMPLETE_EXTENSION")
 
         shoulder_mid = midpoint(xy(landmarks, LM.LEFT_SHOULDER), xy(landmarks, LM.RIGHT_SHOULDER))
@@ -66,4 +82,20 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
             if current_dist - self._elbow_shoulder_dist_at_rep_start > ELBOW_DRIFT_LIMIT:
                 errors.append("ELBOW_DRIFT")
 
-        return AnalysisResult(self.rep_count, self.phase.value, errors, smoothed, confidence)
+        # Velocity-based risk: rapid wrist acceleration (jerking/cheating the curl)
+        if self._prev_landmarks is not None and self.phase == RepPhase.DOWN:
+            wrist_vel = point_velocity(wrist, xy(self._prev_landmarks, wrist_i))
+            wrist_speed = velocity_magnitude(wrist_vel)
+
+            if wrist_speed > WRIST_VELOCITY_DANGER:
+                frame_risk = 60  # High risk: jerking the weight
+                errors.append("JERKING_MOVEMENT")
+            elif wrist_speed > WRIST_VELOCITY_WARN:
+                frame_risk = 30
+
+        self._add_risk_event(frame_risk)
+        self._prev_landmarks = landmarks
+
+        return AnalysisResult(
+            self.rep_count, self.phase.value, errors, smoothed, confidence, self._compute_risk_score()
+        )

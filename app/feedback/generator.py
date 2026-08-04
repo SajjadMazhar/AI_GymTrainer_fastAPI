@@ -6,12 +6,15 @@ FEEDBACK_MESSAGES: dict[str, str] = {
     "NO_PERSON_DETECTED": "Step into the camera frame.",
     "FRONT_KNEE_PAST_TOES": "Step out further — keep your front knee behind your toes.",
     "KNEE_VALGUS": "Push your knees outward, don't let them cave in.",
+    "DYNAMIC_KNEE_INSTABILITY": "Slow down — your knees are moving too fast laterally.",
     "HIP_SAG": "Tighten your core — your hips are dropping.",
     "HIP_PIKE": "Lower your hips — keep a straight line from shoulders to ankles.",
+    "RAPID_CORE_INSTABILITY": "Control your descent — your core is collapsing too quickly.",
     "TORSO_LEANING_FORWARD": "Keep your chest up and back straighter.",
     "TORSO_LEANING": "Keep your torso more upright.",
     "TORSO_SWING": "Avoid swinging your body — control the weight with your arm only.",
     "ELBOW_DRIFT": "Keep your elbow pinned to your side.",
+    "JERKING_MOVEMENT": "Slow down — don't jerk the weight, control the motion.",
     "BACK_KNEE_TOO_HIGH": "Lower your back knee closer to the floor.",
     "SQUAT_NOT_DEEP_ENOUGH": "Go lower — aim to get your thighs closer to parallel.",
     "INSUFFICIENT_DEPTH": "Go a little deeper on this rep.",
@@ -19,9 +22,13 @@ FEEDBACK_MESSAGES: dict[str, str] = {
 }
 
 # Injury-risk-adjacent errors are ranked above depth/completeness (performance) issues.
+# Velocity-based dynamic errors ranked highest as they indicate highest injury risk.
 PRIORITY_ORDER: list[str] = [
     "NO_PERSON_DETECTED",
     "LOW_CONFIDENCE",
+    "DYNAMIC_KNEE_INSTABILITY",  # velocity-based: high injury risk
+    "RAPID_CORE_INSTABILITY",    # velocity-based: high injury risk
+    "JERKING_MOVEMENT",           # velocity-based: high injury risk
     "FRONT_KNEE_PAST_TOES",
     "KNEE_VALGUS",
     "HIP_SAG",

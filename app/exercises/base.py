@@ -30,6 +30,7 @@ class AnalysisResult:
     posture_errors: list[str]
     primary_angle: float | None
     confidence: float
+    risk_score: int = 0  # 0-100, higher = more injury risk from velocity patterns
 
 
 def xy(landmarks: list[Landmark], idx: LM) -> Point:
@@ -64,12 +65,15 @@ def pick_side(
 class ExerciseAnalyzer(ABC):
     name: str
 
-    def __init__(self) -> None:
+    def __init__(self, calibration: dict[str, float] | None = None) -> None:
         self.rep_count = 0
         self.phase = RepPhase.UP
         self._angle_history: list[float] = []
         self._min_angle_this_phase: float | None = None
         self._max_angle_this_phase: float | None = None
+        self._prev_landmarks: list[Landmark] | None = None  # previous frame for velocity computation
+        self._risk_events: list[int] = []  # sliding window of per-frame risk contributions
+        self._calibration = calibration or {}  # personalized thresholds from user calibration
 
     @abstractmethod
     def analyze(self, landmarks: list[Landmark]) -> AnalysisResult:
@@ -118,3 +122,17 @@ class ExerciseAnalyzer(ABC):
                 rep_completed = True
                 self._max_angle_this_phase = smoothed_angle
         return rep_completed
+
+    def _compute_risk_score(self) -> int:
+        """Aggregate recent risk events into a 0-100 score (windowed average)."""
+        if not self._risk_events:
+            return 0
+        # Keep last 10 frames in the window
+        if len(self._risk_events) > 10:
+            self._risk_events = self._risk_events[-10:]
+        avg_risk = sum(self._risk_events) / len(self._risk_events)
+        return int(min(100, max(0, avg_risk)))
+
+    def _add_risk_event(self, risk_value: int) -> None:
+        """Record a per-frame risk contribution (0-100)."""
+        self._risk_events.append(risk_value)

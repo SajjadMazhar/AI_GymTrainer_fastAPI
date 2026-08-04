@@ -11,3 +11,7 @@ httpx>=0.27  # needed by fastapi.testclient.TestClient for tests/test_video_uplo
 
 # Optional pose backend (YOLOv11-pose). Install if you want to use POSE_BACKEND=yolo.
 ultralytics>=8.3
+
+# Optional exercise auto-detection with LSTM classifier. Install if you want auto-detection.
+tensorflow>=2.13
+scikit-learn>=1.3

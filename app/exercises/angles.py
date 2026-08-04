@@ -41,3 +41,36 @@ def euclidean_distance(p1: Point, p2: Point) -> float:
 
 def midpoint(p1: Point, p2: Point) -> Point:
     return ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+
+
+def point_velocity(current: Point, previous: Point, dt: float = 1.0) -> tuple[float, float]:
+    """Compute 2D velocity vector (vx, vy) from two consecutive positions.
+
+    Args:
+        current: Current frame position (x, y)
+        previous: Previous frame position (x, y)
+        dt: Time delta in seconds (defaults to 1.0 for per-frame velocity)
+
+    Returns:
+        (vx, vy) velocity vector in normalized units per second
+    """
+    if dt <= 0:
+        return (0.0, 0.0)
+    vx = (current[0] - previous[0]) / dt
+    vy = (current[1] - previous[1]) / dt
+    return (vx, vy)
+
+
+def velocity_magnitude(velocity: tuple[float, float]) -> float:
+    """Compute magnitude (speed) from a 2D velocity vector."""
+    return float(np.hypot(velocity[0], velocity[1]))
+
+
+def lateral_velocity(velocity: tuple[float, float]) -> float:
+    """Extract horizontal (x-axis) velocity component, signed."""
+    return velocity[0]
+
+
+def vertical_velocity(velocity: tuple[float, float]) -> float:
+    """Extract vertical (y-axis) velocity component, signed (positive = downward in image space)."""
+    return velocity[1]

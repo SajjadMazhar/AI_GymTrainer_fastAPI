@@ -31,6 +31,7 @@ class VideoAnalysisResult:
     calories_estimate: float
     feedback_summary: list[str]
     truncated: bool
+    average_risk_score: int = 0  # average risk score across all frames
 
 
 def analyze_video_file(
@@ -56,6 +57,7 @@ def analyze_video_file(
     frames_processed = 0
     frames_with_person_detected = 0
     truncated = False
+    risk_scores: list[int] = []  # collect risk scores for averaging
 
     try:
         while True:
@@ -76,6 +78,7 @@ def analyze_video_file(
             result = analyzer.analyze(pose_result.landmarks)
             for code in result.posture_errors:
                 error_counts[code] += 1
+            risk_scores.append(result.risk_score)
     finally:
         capture.release()
         pose_estimator.close()
@@ -85,6 +88,7 @@ def analyze_video_file(
 
     observed_errors = [code for code in error_counts if code != "NO_PERSON_DETECTED"]
     feedback_summary = FeedbackGenerator().generate(observed_errors, max_messages=3)
+    avg_risk = int(sum(risk_scores) / len(risk_scores)) if risk_scores else 0
 
     return VideoAnalysisResult(
         exercise=exercise,
@@ -96,4 +100,5 @@ def analyze_video_file(
         calories_estimate=calories,
         feedback_summary=feedback_summary,
         truncated=truncated,
+        average_risk_score=avg_risk,
     )

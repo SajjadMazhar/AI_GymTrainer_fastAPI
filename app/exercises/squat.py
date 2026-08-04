@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from app.exercises.angles import calculate_angle, horizontal_distance, midpoint, vertical_deviation_angle
+from app.exercises.angles import (
+    calculate_angle,
+    horizontal_distance,
+    lateral_velocity,
+    midpoint,
+    point_velocity,
+    velocity_magnitude,
+    vertical_deviation_angle,
+)
 from app.exercises.base import (
     VISIBILITY_THRESHOLD,
     AnalysisResult,
@@ -19,6 +27,10 @@ SHALLOW_DEPTH_CUTOFF = 100.0  # must reach at or below this angle to count as de
 VALGUS_RATIO = 0.7  # knee-gap < this * ankle-gap -> knees caving in
 TORSO_LEAN_LIMIT = 45.0  # degrees off vertical
 
+# Velocity-based risk thresholds
+LATERAL_KNEE_VELOCITY_WARN = 0.15  # normalized units/frame - sudden lateral knee movement during ascent
+LATERAL_KNEE_VELOCITY_DANGER = 0.25  # above this = high injury risk
+
 _LEFT_LEG = (LM.LEFT_HIP, LM.LEFT_KNEE, LM.LEFT_ANKLE)
 _RIGHT_LEG = (LM.RIGHT_HIP, LM.RIGHT_KNEE, LM.RIGHT_ANKLE)
 
@@ -34,11 +46,20 @@ class SquatAnalyzer(ExerciseAnalyzer):
 
         knee_angle = calculate_angle(xy(landmarks, hip_i), xy(landmarks, knee_i), xy(landmarks, ankle_i))
         smoothed = self._smooth(knee_angle)
-        rep_completed = self._update_phase(smoothed, DOWN_THRESH, UP_THRESH)
+
+        # Use personalized thresholds if available, otherwise use defaults
+        down_thresh = self._calibration.get("down_threshold", DOWN_THRESH)
+        up_thresh = self._calibration.get("up_threshold", UP_THRESH)
+        depth_cutoff = self._calibration.get("depth_cutoff", SHALLOW_DEPTH_CUTOFF)
+
+        # Track previous frame for velocity computation
+        prev_phase = self.phase
+        rep_completed = self._update_phase(smoothed, down_thresh, up_thresh)
 
         errors: list[str] = []
+        frame_risk = 0  # 0-100 risk contribution this frame
         if rep_completed and self._min_angle_this_phase is not None:
-            if self._min_angle_this_phase > SHALLOW_DEPTH_CUTOFF:
+            if self._min_angle_this_phase > depth_cutoff:
                 errors.append("SQUAT_NOT_DEEP_ENOUGH")
 
         if self.phase == RepPhase.DOWN:
@@ -52,4 +73,27 @@ class SquatAnalyzer(ExerciseAnalyzer):
             if vertical_deviation_angle(shoulder_mid, hip_mid) > TORSO_LEAN_LIMIT:
                 errors.append("TORSO_LEANING_FORWARD")
 
-        return AnalysisResult(self.rep_count, self.phase.value, errors, smoothed, confidence)
+        # Velocity-based risk: lateral knee velocity during ascent (DOWN->UP transition or early UP phase)
+        # This catches dynamic knee valgus/varus that static checks miss
+        if self._prev_landmarks is not None and prev_phase == RepPhase.DOWN and self.phase == RepPhase.UP:
+            # Just transitioned from DOWN to UP (ascending phase where injury risk is highest)
+            left_knee_vel = point_velocity(xy(landmarks, LM.LEFT_KNEE), xy(self._prev_landmarks, LM.LEFT_KNEE))
+            right_knee_vel = point_velocity(xy(landmarks, LM.RIGHT_KNEE), xy(self._prev_landmarks, LM.RIGHT_KNEE))
+
+            # Check magnitude of lateral (horizontal) knee velocity
+            left_lateral_speed = abs(lateral_velocity(left_knee_vel))
+            right_lateral_speed = abs(lateral_velocity(right_knee_vel))
+            max_lateral_speed = max(left_lateral_speed, right_lateral_speed)
+
+            if max_lateral_speed > LATERAL_KNEE_VELOCITY_DANGER:
+                frame_risk = 80  # High risk: rapid lateral knee movement during ascent
+                errors.append("DYNAMIC_KNEE_INSTABILITY")
+            elif max_lateral_speed > LATERAL_KNEE_VELOCITY_WARN:
+                frame_risk = 40  # Moderate risk
+
+        self._add_risk_event(frame_risk)
+        self._prev_landmarks = landmarks  # Store for next frame
+
+        return AnalysisResult(
+            self.rep_count, self.phase.value, errors, smoothed, confidence, self._compute_risk_score()
+        )

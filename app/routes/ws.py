@@ -47,9 +47,25 @@ async def session_endpoint(ws: WebSocket) -> None:
         await ws.close()
         return
 
+    # Load user calibration if user_id provided
+    calibration_data = None
+    if config.user_id:
+        from app.user.profile import ProfileStore
+
+        profile_store = ProfileStore()
+        profile = profile_store.load(config.user_id)
+        if profile:
+            cal = profile.get_calibration(config.exercise)
+            if cal:
+                calibration_data = {
+                    "down_threshold": cal.down_threshold,
+                    "up_threshold": cal.up_threshold,
+                    "depth_cutoff": cal.depth_cutoff,
+                }
+
     session = SessionState(
         pose_estimator=get_pose_estimator(settings.pose_backend, settings.model_complexity),
-        analyzer=EXERCISES[config.exercise](),
+        analyzer=EXERCISES[config.exercise](calibration_data),
         calorie_estimator=CalorieEstimator(config.exercise, config.bodyweight_kg),
     )
     loop = asyncio.get_running_loop()
@@ -95,6 +111,7 @@ async def session_endpoint(ws: WebSocket) -> None:
                     "calories_estimate": calories,
                     "elapsed_seconds": round(elapsed, 1),
                     "processing_ms": round(processing_ms, 1),
+                    "risk_score": result.risk_score,
                 }
             )
     except WebSocketDisconnect:

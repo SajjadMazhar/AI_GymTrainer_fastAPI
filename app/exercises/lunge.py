@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from app.exercises.angles import calculate_angle, midpoint, vertical_deviation_angle
+from app.exercises.angles import (
+    calculate_angle,
+    lateral_velocity,
+    midpoint,
+    point_velocity,
+    vertical_deviation_angle,
+)
 from app.exercises.base import (
     VISIBILITY_THRESHOLD,
     AnalysisResult,
@@ -18,6 +24,10 @@ SHALLOW_DEPTH_CUTOFF = 100.0  # front knee must reach at or below this to count 
 KNEE_PAST_TOES_MARGIN = 0.03  # normalized-x tolerance
 BACK_KNEE_HIGH_LIMIT = 130.0  # back knee angle above this while front knee is down = not low enough
 TORSO_LEAN_LIMIT = 30.0  # degrees off vertical (stricter than squat, lunges stay more upright)
+
+# Velocity-based risk thresholds
+FRONT_KNEE_LATERAL_VELOCITY_WARN = 0.12  # lateral knee instability during lunge
+FRONT_KNEE_LATERAL_VELOCITY_DANGER = 0.22
 
 _LEFT_LEG = (LM.LEFT_HIP, LM.LEFT_KNEE, LM.LEFT_ANKLE)
 _RIGHT_LEG = (LM.RIGHT_HIP, LM.RIGHT_KNEE, LM.RIGHT_ANKLE)
@@ -51,11 +61,19 @@ class LungeAnalyzer(ExerciseAnalyzer):
 
         front_angle = calculate_angle(front_hip, front_knee, front_ankle)
         smoothed = self._smooth(front_angle)
-        rep_completed = self._update_phase(smoothed, DOWN_THRESH, UP_THRESH)
+
+        # Use personalized thresholds if available
+        down_thresh = self._calibration.get("down_threshold", DOWN_THRESH)
+        up_thresh = self._calibration.get("up_threshold", UP_THRESH)
+        depth_cutoff = self._calibration.get("depth_cutoff", SHALLOW_DEPTH_CUTOFF)
+
+        prev_phase = self.phase
+        rep_completed = self._update_phase(smoothed, down_thresh, up_thresh)
 
         errors: list[str] = []
+        frame_risk = 0
         if rep_completed and self._min_angle_this_phase is not None:
-            if self._min_angle_this_phase > SHALLOW_DEPTH_CUTOFF:
+            if self._min_angle_this_phase > depth_cutoff:
                 errors.append("INSUFFICIENT_DEPTH")
 
         if self.phase == RepPhase.DOWN:
@@ -76,4 +94,32 @@ class LungeAnalyzer(ExerciseAnalyzer):
                 if vertical_deviation_angle(shoulder_mid, hip_mid) > TORSO_LEAN_LIMIT:
                     errors.append("TORSO_LEANING")
 
-        return AnalysisResult(self.rep_count, self.phase.value, errors, smoothed, confidence)
+        # Velocity-based risk: lateral front knee velocity during ascent (similar to squat)
+        if self._prev_landmarks is not None and prev_phase == RepPhase.DOWN and self.phase == RepPhase.UP:
+            # Determine which knee is the front knee from previous frame
+            prev_left_ankle = xy(self._prev_landmarks, LM.LEFT_ANKLE)
+            prev_right_ankle = xy(self._prev_landmarks, LM.RIGHT_ANKLE)
+            prev_hip_mid = midpoint(xy(self._prev_landmarks, LM.LEFT_HIP), xy(self._prev_landmarks, LM.RIGHT_HIP))
+            prev_left_dist = abs(prev_left_ankle[0] - prev_hip_mid[0])
+            prev_right_dist = abs(prev_right_ankle[0] - prev_hip_mid[0])
+
+            if prev_left_dist >= prev_right_dist:
+                front_knee_idx = LM.LEFT_KNEE
+            else:
+                front_knee_idx = LM.RIGHT_KNEE
+
+            front_knee_vel = point_velocity(xy(landmarks, front_knee_idx), xy(self._prev_landmarks, front_knee_idx))
+            front_knee_lateral_speed = abs(lateral_velocity(front_knee_vel))
+
+            if front_knee_lateral_speed > FRONT_KNEE_LATERAL_VELOCITY_DANGER:
+                frame_risk = 75  # High risk during lunge ascent
+                errors.append("DYNAMIC_KNEE_INSTABILITY")
+            elif front_knee_lateral_speed > FRONT_KNEE_LATERAL_VELOCITY_WARN:
+                frame_risk = 38
+
+        self._add_risk_event(frame_risk)
+        self._prev_landmarks = landmarks
+
+        return AnalysisResult(
+            self.rep_count, self.phase.value, errors, smoothed, confidence, self._compute_risk_score()
+        )

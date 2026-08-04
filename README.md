@@ -6,6 +6,9 @@ camera and, in real time:
 - **Counts reps** for squats, push-ups, bicep curls, and lunges
 - **Detects incorrect posture** (e.g. knees caving in, hips sagging, leaning
   too far forward) and tells you what to fix
+- **Shows it visually**: a live skeleton overlay on the camera feed, drawn
+  green for correct posture and red on the specific joints implicated in
+  whatever posture error is currently flagged
 - **Estimates calories burned** during the session
 - **Gives personalized feedback** as you train, prioritized by injury risk
 
@@ -44,6 +47,13 @@ One `PoseEstimator` and one exercise `Analyzer` instance is created per phone
 connection, so multiple people/phones can use the server at once without
 interfering with each other. Nothing is persisted: closing or refreshing the
 page resets the session to zero.
+
+On the frontend, a `requestAnimationFrame` loop in `app.js` continuously
+redraws the video frame plus whatever landmarks/posture errors were most
+recently received, independent of the WebSocket's analysis rate — this keeps
+the video smooth and is what makes the skeleton overlay actually persist on
+screen (drawing it only inside the WebSocket message handler let the next
+captured video frame wipe it out before the browser ever painted it).
 
 ## Project Structure
 
@@ -116,13 +126,54 @@ entirely, install [mkcert](https://github.com/FiloSottile/mkcert), run
 `certs/` (as `cert.pem`/`key.pem`) and also install mkcert's root CA on your
 phone.
 
+## Camera Placement
+
+Pose detection only sees the world as a flat 2D image, so *where* the camera
+sits relative to your body matters — it determines which posture checks can
+actually see what they're measuring. Get this wrong and reps may undercount,
+or posture warnings may fire incorrectly (or never fire at all).
+
+**General setup, every exercise:**
+
+- **Prop the phone up** against something steady (a chair, wall, stack of
+  books) — don't hold it, hand shake throws off the joint-angle math.
+- **Whole body in frame**, head to feet, with a bit of margin above/below —
+  if a limb is cropped out, that joint's confidence drops and checks using it
+  get skipped.
+- **Stand back far enough** (roughly 6–8 ft / 2–2.5 m) that you can move
+  through the full rep without stepping out of frame.
+- **Camera at roughly waist-to-chest height.** Very low or very high angles
+  distort the joint angles the analyzer computes.
+- **Good, even lighting**, and avoid standing in front of a bright window —
+  a strong backlight silhouettes you and pose detection fails outright.
+
+**Per exercise** (this follows directly from what each analyzer actually
+measures — see `app/exercises/`):
+
+| Exercise | Best angle | Why |
+|---|---|---|
+| **Squat** | Side-on, or a ~30–45° turn (three-quarter view) | `TORSO_LEANING_FORWARD` reads your forward lean, which only shows up as a clear angle from the side. A three-quarter view is the best single compromise, since `KNEE_VALGUS` (knees caving in) is easier to see from the front. |
+| **Lunge** | Side-on (profile) | The front/back leg is told apart by how far left-right apart your ankles are in frame. Stepping toward/away from the camera instead of across it collapses that distance, so front-leg detection (and `FRONT_KNEE_PAST_TOES`/`BACK_KNEE_TOO_HIGH`) won't work reliably. |
+| **Push-up** | Side-on, camera near floor/hip height | `HIP_SAG`/`HIP_PIKE` check for a straight line from shoulder to hip to ankle — that line only reads correctly viewed from the side. |
+| **Bicep curl** | Face the camera directly (front-on) | Keeps both arms, shoulders, and hips visible at once, which `TORSO_SWING` and `ELBOW_DRIFT` both need. |
+
+If you can only pick one general position for a mixed session, a **~30–45°
+three-quarter view** is the safest default — it keeps enough of both the
+front and side visible for most checks, at some cost to precision on any one
+of them.
+
 ## Using it
 
 1. Open the URL on your phone, grant camera access.
 2. Pick an exercise and enter your bodyweight.
-3. Prop the phone up so your whole body is visible, tap **Start Workout**.
-4. Do reps — the rep counter, calorie estimate, and feedback update live.
-   Tap the circular button on the video to switch between front/rear camera.
+3. Prop the phone up so your whole body is visible (see
+   [Camera Placement](#camera-placement) above), tap **Start Workout**.
+4. Do reps — the rep counter, calorie estimate, and feedback update live. A
+   skeleton is drawn over your body: **green** means that part looks correct;
+   it turns **red** on whichever joints are implicated by the current posture
+   warning (e.g. your legs turn red for a knee-valgus/depth issue, your torso
+   for a leaning/hip issue, your arms for an elbow/extension issue). Tap the
+   circular button on the video to switch between front/rear camera.
 5. Tap **Stop** to end the session (nothing is saved).
 
 ## Testing with a video upload (no camera)
@@ -215,11 +266,12 @@ python scripts/local_pipeline_test.py --exercise pushup --video clip.mp4
 2. Confirm the phone and server machine are on the same Wi-Fi.
 3. Open the HTTPS URL on the phone, accept the certificate warning.
 4. Grant camera permission, pick an exercise, enter bodyweight, confirm the
-   video preview and skeleton overlay appear and track movement smoothly.
+   video preview and green skeleton overlay appear and track movement smoothly.
 5. Do 5 reps with good form — rep count should reach 5 and show "Nice form —
-   keep it up!".
+   keep it up!" with the skeleton staying green throughout.
 6. Do reps with deliberately bad form (e.g. shallow squat, knees caving in)
-   and confirm the matching posture error/feedback appears.
+   and confirm the matching posture error/feedback appears and the relevant
+   joints (e.g. legs for knee valgus) turn red on the overlay.
 7. Check the calorie estimate climbs plausibly over a longer session.
 8. Refresh mid-session and confirm everything resets to zero (no
    persistence, by design).

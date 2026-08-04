@@ -10,6 +10,7 @@ class ConfigMessage(BaseModel):
     exercise: Literal["squat", "pushup", "bicep_curl", "lunge"]
     bodyweight_kg: float = Field(gt=0, le=400)
     target_fps: int = Field(default=8, ge=1, le=30)
+    user_id: str | None = None  # optional: load personalized calibration if provided
 
 
 class LandmarkOut(BaseModel):
@@ -29,6 +30,7 @@ class AnalysisMessage(BaseModel):
     calories_estimate: float
     elapsed_seconds: float
     processing_ms: float
+    risk_score: int = 0  # 0-100 injury risk score from velocity patterns
 
 
 class ErrorMessage(BaseModel):
