@@ -130,12 +130,19 @@ async def auto_detect_endpoint(ws: WebSocket) -> None:
                         "depth_cutoff": cal.depth_cutoff,
                     }
 
-        # Initialize session with detected exercise
+        # Initialize video recorder and session with detected exercise
+        from app.recording.video_recorder import VideoRecorder
+
+        video_recorder = VideoRecorder()
+
         session = SessionState(
             pose_estimator=pose_estimator,
             analyzer=EXERCISES[detected_exercise](calibration_data),
             calorie_estimator=CalorieEstimator(detected_exercise, config.bodyweight_kg),
+            video_recorder=video_recorder,
         )
+
+        recording_started_main = False
 
         # Phase 3: Normal workout analysis loop
         while True:
@@ -146,6 +153,22 @@ async def auto_detect_endpoint(ws: WebSocket) -> None:
             frame = cv2.imdecode(frame_np, cv2.IMREAD_COLOR)
             if frame is None:
                 continue
+
+            # Start recording on first valid frame in main workout loop
+            if not recording_started_main and frame is not None:
+                height, width = frame.shape[:2]
+                recording_path = video_recorder.start(
+                    exercise=detected_exercise,
+                    user_id=config.user_id,
+                    width=width,
+                    height=height,
+                )
+                recording_started_main = True
+                print(f"Started recording: {recording_path}")
+
+            # Write frame to video
+            if video_recorder.is_recording():
+                video_recorder.write_frame(frame)
 
             pose_result = await loop.run_in_executor(None, pose_estimator.process, frame)
             processing_ms = (time.perf_counter() - start_time) * 1000
@@ -163,20 +186,26 @@ async def auto_detect_endpoint(ws: WebSocket) -> None:
             calories = session.calorie_estimator.estimate(elapsed)
             feedback = FeedbackGenerator().generate(errors, max_messages=settings.max_feedback_messages)
 
-            await ws.send_json(
-                {
-                    "type": "analysis",
-                    "landmarks": landmarks_out,
-                    "rep_count": result.rep_count,
-                    "phase": result.phase,
-                    "posture_errors": errors,
-                    "feedback": feedback,
-                    "calories_estimate": calories,
-                    "elapsed_seconds": round(elapsed, 1),
-                    "processing_ms": round(processing_ms, 1),
-                    "risk_score": result.risk_score,
-                }
-            )
+            response = {
+                "type": "analysis",
+                "landmarks": landmarks_out,
+                "rep_count": result.rep_count,
+                "phase": result.phase,
+                "posture_errors": errors,
+                "feedback": feedback,
+                "calories_estimate": calories,
+                "elapsed_seconds": round(elapsed, 1),
+                "processing_ms": round(processing_ms, 1),
+                "risk_score": result.risk_score,
+                "recording": video_recorder.is_recording(),
+            }
+
+            # Send recording notification on first frame
+            if recording_started_main and video_recorder.get_current_path():
+                response["recording_path"] = str(video_recorder.get_current_path().name)
+                recording_started_main = False  # Only send once
+
+            await ws.send_json(response)
 
     except WebSocketDisconnect:
         pass

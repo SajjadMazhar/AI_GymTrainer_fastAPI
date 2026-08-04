@@ -63,12 +63,20 @@ async def session_endpoint(ws: WebSocket) -> None:
                     "depth_cutoff": cal.depth_cutoff,
                 }
 
+    # Initialize video recorder
+    from app.recording.video_recorder import VideoRecorder
+
+    video_recorder = VideoRecorder()
+
     session = SessionState(
         pose_estimator=get_pose_estimator(settings.pose_backend, settings.model_complexity),
         analyzer=EXERCISES[config.exercise](calibration_data),
         calorie_estimator=CalorieEstimator(config.exercise, config.bodyweight_kg),
+        video_recorder=video_recorder,
     )
     loop = asyncio.get_running_loop()
+
+    recording_started = False
 
     try:
         while True:
@@ -76,6 +84,22 @@ async def session_endpoint(ws: WebSocket) -> None:
             frame = _decode_frame(frame_bytes)
             if frame is None:
                 continue
+
+            # Start recording on first valid frame
+            if not recording_started and frame is not None:
+                height, width = frame.shape[:2]
+                recording_path = video_recorder.start(
+                    exercise=config.exercise,
+                    user_id=config.user_id,
+                    width=width,
+                    height=height,
+                )
+                recording_started = True
+                print(f"Started recording: {recording_path}")
+
+            # Write frame to video
+            if video_recorder.is_recording():
+                video_recorder.write_frame(frame)
 
             t0 = time.monotonic()
             pose_result: PoseResult = await loop.run_in_executor(None, session.pose_estimator.process, frame)
@@ -100,20 +124,26 @@ async def session_endpoint(ws: WebSocket) -> None:
                 result.posture_errors, max_messages=settings.max_feedback_messages
             )
 
-            await ws.send_json(
-                {
-                    "type": "analysis",
-                    "landmarks": landmarks_out,
-                    "rep_count": result.rep_count,
-                    "phase": result.phase,
-                    "posture_errors": result.posture_errors,
-                    "feedback": feedback,
-                    "calories_estimate": calories,
-                    "elapsed_seconds": round(elapsed, 1),
-                    "processing_ms": round(processing_ms, 1),
-                    "risk_score": result.risk_score,
-                }
-            )
+            response = {
+                "type": "analysis",
+                "landmarks": landmarks_out,
+                "rep_count": result.rep_count,
+                "phase": result.phase,
+                "posture_errors": result.posture_errors,
+                "feedback": feedback,
+                "calories_estimate": calories,
+                "elapsed_seconds": round(elapsed, 1),
+                "processing_ms": round(processing_ms, 1),
+                "risk_score": result.risk_score,
+                "recording": video_recorder.is_recording(),
+            }
+
+            # Send recording notification on first frame
+            if recording_started and video_recorder.get_current_path():
+                response["recording_path"] = str(video_recorder.get_current_path().name)
+                recording_started = False  # Only send once
+
+            await ws.send_json(response)
     except WebSocketDisconnect:
         pass
     finally:

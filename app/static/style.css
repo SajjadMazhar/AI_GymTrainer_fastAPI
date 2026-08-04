@@ -191,3 +191,29 @@ input {
   text-align: center;
   z-index: 100;
 }
+
+.recording-indicator {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(218, 54, 51, 0.9);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+}
+
+.rec-dot {
+  animation: blink 1.5s infinite;
+  font-size: 1.2rem;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
+}

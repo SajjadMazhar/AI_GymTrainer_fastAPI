@@ -13,6 +13,7 @@ from app.calories.estimator import CalorieEstimator
 from app.exercises.base import ExerciseAnalyzer
 from app.feedback.generator import FeedbackGenerator
 from app.pose.base import PoseEstimator
+from app.recording.video_recorder import VideoRecorder
 
 
 @dataclass
@@ -21,6 +22,7 @@ class SessionState:
     analyzer: ExerciseAnalyzer
     calorie_estimator: CalorieEstimator
     feedback_generator: FeedbackGenerator = field(default_factory=FeedbackGenerator)
+    video_recorder: VideoRecorder | None = None
     started_at: float = field(default_factory=time.monotonic)
 
     def elapsed_seconds(self) -> float:
@@ -28,3 +30,7 @@ class SessionState:
 
     def close(self) -> None:
         self.pose_estimator.close()
+        if self.video_recorder and self.video_recorder.is_recording():
+            metadata = self.video_recorder.stop()
+            if metadata:
+                print(f"Recording saved: {metadata['path']} ({metadata['duration_seconds']}s, {metadata['frame_count']} frames)")

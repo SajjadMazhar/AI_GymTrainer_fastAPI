@@ -82,6 +82,7 @@ const caloriesEl = document.getElementById("calories");
 const timerEl = document.getElementById("timer");
 const riskScoreEl = document.getElementById("risk-score");
 const feedbackEl = document.getElementById("feedback");
+const recordingIndicator = document.getElementById("recording-indicator");
 
 const videoFileInput = document.getElementById("video-file-input");
 const analyzeVideoBtn = document.getElementById("analyze-video-btn");
@@ -363,6 +364,16 @@ function renderAnalysis(data) {
 
   feedbackEl.textContent = (data.feedback || []).join("  ");
   feedbackEl.classList.toggle("warning", (data.posture_errors || []).length > 0);
+
+  // Show/hide recording indicator
+  if (data.recording !== undefined) {
+    recordingIndicator.hidden = !data.recording;
+  }
+
+  // Show recording filename notification (only once)
+  if (data.recording_path) {
+    console.log(`Recording to: ${data.recording_path}`);
+  }
 }
 
 // Which skeleton connections (by "a-b" landmark-index key) should be drawn
